@@ -1422,3 +1422,25 @@ nad_t nad_parse(const char *buf, int len) {
 
     return bd.nad;
 }
+
+
+int nad_get_attrval(nad_t nad, int elem, int ns, const char *name, char* buff, int len)
+{
+    int xmlindex;
+
+    if((xmlindex = nad_find_attr(nad, elem, ns, name, NULL)) < 0)
+    {
+        return -1;
+    }
+
+    if(NAD_AVAL_L(nad, xmlindex) == 0 || NAD_AVAL_L(nad, xmlindex) >= len)
+    {
+        strncpy(buff, NAD_AVAL(nad, xmlindex), len);
+        buff[len -1] = 0;
+        return -1;
+    }
+
+    strncpy(buff, NAD_AVAL(nad, xmlindex), NAD_AVAL_L(nad, xmlindex));
+    buff[NAD_AVAL_L(nad, xmlindex)] = 0;
+    return 0;
+}

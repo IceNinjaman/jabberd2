@@ -139,6 +139,16 @@ static void _c2s_config_expand(c2s_t c2s)
     if(c2s->local_ip == NULL)
         c2s->local_ip = "0.0.0.0";
 
+    c2s->local_http_ip = config_get_one(c2s->config, "local.http_bind.ip", 0);
+    if(c2s->local_http_ip == NULL)
+        c2s->local_http_ip = "0.0.0.0";
+
+    c2s->local_http_port = j_atoi(config_get_one(c2s->config, "local.http_bind.port", 0), 0);
+    c2s->local_http_pemfile = config_get_one(c2s->config, "local.http_bind.pemfile", 0);
+    c2s->local_http_cachain = config_get_one(c2s->config, "local.http_bind.cachain", 0);
+    c2s->local_http_private_key_password = config_get_one(c2s->config, "local.http_bind.private_key_password", 0);
+    c2s->local_http_verify_mode = j_atoi(config_get_one(c2s->config, "local.http_bind.verify-mode", 0), 0);
+
     c2s->local_port = j_atoi(config_get_one(c2s->config, "local.port", 0), 0);
 
     c2s->local_pemfile = config_get_one(c2s->config, "local.pemfile", 0);
@@ -615,6 +625,7 @@ JABBER_MAIN("jabberd2c2s", "Jabber 2 C2S", "Jabber Open Source Server: Client to
     bres_t res;
     union xhashv xhv;
     time_t check_time = 0;
+    time_t bosh_check_time = 0;
     const char *cli_id = 0;
 
 #ifdef HAVE_UMASK
@@ -740,6 +751,14 @@ JABBER_MAIN("jabberd2c2s", "Jabber 2 C2S", "Jabber Open Source Server: Client to
         if(c2s->sx_ssl == NULL) {
             log_write(c2s->log, LOG_ERR, "failed to load local SSL pemfile, SSL will not be available to clients");
             c2s->local_pemfile = NULL;
+        }
+    }
+
+    if(c2s->local_http_pemfile != NULL) {
+        c2s->sx_bosh_ssl = c2s_bosh_init_ssl_sx_once(c2s, NULL, c2s->local_http_pemfile, c2s->local_http_cachain, c2s->local_http_verify_mode, c2s->local_http_private_key_password);
+        if(c2s->sx_bosh_ssl == NULL) {
+            log_write(c2s->log, LOG_ERR, "failed to load local SSL pemfile, SSL will not be available to http-clients");
+            c2s->local_http_pemfile = NULL;
         }
     }
 
@@ -896,6 +915,8 @@ JABBER_MAIN("jabberd2c2s", "Jabber 2 C2S", "Jabber Open Source Server: Client to
             if(sess->rate != NULL) rate_free(sess->rate);
             if(sess->stanza_rate != NULL) rate_free(sess->stanza_rate);
 
+            if(sess->bosh != NULL) c2s_bosh_free_session(sess);
+
             free(sess);
         }
 
@@ -934,6 +955,12 @@ JABBER_MAIN("jabberd2c2s", "Jabber 2 C2S", "Jabber Open Source Server: Client to
             }
 
             check_time = time(NULL);
+        }
+
+        if(time(NULL) > bosh_check_time + BOSH_MINWAIT) {
+
+            _c2s_client_bosh_session_timeout_check(c2s);
+            bosh_check_time = time(NULL);
         }
     }
 
@@ -1011,3 +1038,4 @@ JABBER_MAIN("jabberd2c2s", "Jabber 2 C2S", "Jabber Open Source Server: Client to
 
     return 0;
 }
+

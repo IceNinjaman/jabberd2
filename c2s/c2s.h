@@ -54,7 +54,8 @@ typedef struct c2s_st       *c2s_t;
 typedef struct bres_st      *bres_t;
 typedef struct sess_st      *sess_t;
 typedef struct authreg_st   *authreg_t;
-
+typedef struct bosh_socket_st      *bosh_socket_t;
+typedef struct bosh_sess_st      *bosh_sess_t;
 /** list of resources bound to session */
 struct bres_st {
     /** full bound jid */
@@ -111,6 +112,8 @@ struct sess_st {
 
     /** Apple: session challenge for challenge-response authentication */
     char                auth_challenge[65];
+
+    bosh_sess_t         bosh;
 };
 
 /* allowed mechanisms */
@@ -168,6 +171,7 @@ struct c2s_st {
     sx_env_t            sx_env;
     sx_plugin_t         sx_ssl;
     sx_plugin_t         sx_sasl;
+    sx_plugin_t         sx_bosh_ssl;
 
     /** router's conn */
     sx_t                router;
@@ -175,6 +179,8 @@ struct c2s_st {
 
     /** listening sockets */
     mio_fd_t            server_fd;
+    mio_fd_t            server_http_fd;
+
 #ifdef HAVE_SSL
     mio_fd_t            server_ssl_fd;
 #endif
@@ -202,24 +208,33 @@ struct c2s_st {
 
     /** ip to listen on */
     const char          *local_ip;
+    /** ip to listen on for http-bind */
+    const char          *local_http_ip;
 
     /** unencrypted port */
     int                 local_port;
+
+    /** port for http-bind */
+    int                 local_http_port;
 
     /** encrypted port */
     int                 local_ssl_port;
 
     /** encrypted port pemfile */
     const char          *local_pemfile;
+    const char          *local_http_pemfile;
 
     /** encrypted port cachain file */
     const char          *local_cachain;
+    const char          *local_http_cachain;
 
     /** private key password */
     const char          *local_private_key_password;
+    const char          *local_http_private_key_password;
 
     /** verify-mode  */
     int                 local_verify_mode;
+    int                 local_http_verify_mode;
 
     /** http forwarding URL */
     const char          *http_forward;
@@ -383,3 +398,67 @@ typedef struct stream_redirect_st
     const char *to_port;
 } *stream_redirect_t;
 
+
+/**
+ * There is one instance of this struct per connection a user has made.
+ * they usually getting frequently freed and allocated.
+ */
+struct bosh_socket_st
+{
+    c2s_t               c2s;
+
+    mio_fd_t            fd;
+
+    sess_t              sess;
+
+    char                ip[50];
+
+    int                 http_contentlength; /* This is the extracted Content-Length attribute. It is need to know when we are done with reading */
+    int                 waitpoint; /*This is the time in which we have to respond on this connnection.
+                                     If this value is 0 we have already acked the connection and can not write to it until the client has answered it*/
+    int                 want_read;
+    int                 want_write;
+    struct _sx_buf_st   read_buf;
+    struct _sx_buf_st   write_buf;
+#ifdef HAVE_SSL
+    void*               ssl_conn_data;
+#endif
+};
+
+struct bosh_sess_st
+{
+    //This is only used for BOSH. ToDO: make it a pointer to an extra struct and allocated memory
+    int                 rid;
+    int                 wait;
+    int                 inactivitypoint;
+
+    char*               sendbuf;
+    int                 sendcursize;
+
+    /* A stupid pointer for c2s_bosh_sx_callback write event. This is not a allocated memory from heap */
+    char*               sx_buf;
+    int                 sx_buflen;
+
+    bosh_socket_t       connection1;
+    bosh_socket_t       connection2;
+};
+
+#define BOSH_MAXWAIT 30
+//mio_run has a 5 seconds timeout
+#define BOSH_MINWAIT 7
+#define BOSH_WAITMARGIN 10
+
+#define BOSH_MAXINACTIVITYTIME 30
+//How long can be a single message in kilobytes ?
+#define BOSH_MAX_HTTP_CONTENTLENGTH 256
+
+C2S_API int _c2s_client_bosh_mio_callback(mio_t m, mio_action_t a, mio_fd_t fd, void *data, void *arg);
+C2S_API void _c2s_client_bosh_session_timeout_check(c2s_t c2s);
+C2S_API void c2s_bosh_free_session(sess_t sess);
+C2S_API int _c2s_client_accept_check(c2s_t c2s, mio_fd_t fd, const char *ip);
+
+#ifdef HAVE_SSL
+
+C2S_API sx_plugin_t c2s_bosh_init_ssl_sx_once(c2s_t c2s, ...);
+
+#endif

@@ -507,7 +507,7 @@ static int _c2s_client_sx_callback(sx_t s, sx_event_t e, void *data, void *arg) 
     return 0;
 }
 
-static int _c2s_client_accept_check(c2s_t c2s, mio_fd_t fd, const char *ip) {
+int _c2s_client_accept_check(c2s_t c2s, mio_fd_t fd, const char *ip) {
     rate_t rt;
 
     if(access_check(c2s->access, ip) == 0) {
@@ -884,6 +884,19 @@ int c2s_router_sx_callback(sx_t s, sx_event_t e, void *data, void *arg) {
                     } else
                         c2s->server_ssl_fd = NULL;
 #endif
+                }
+
+                if(c2s->server_http_fd == 0) {
+
+                    if(c2s->local_http_port != 0) {
+                        c2s->server_http_fd = mio_listen(c2s->mio, c2s->local_http_port, c2s->local_http_ip, _c2s_client_bosh_mio_callback, (void *) c2s);
+                        if(c2s->server_http_fd == NULL)
+                            log_write(c2s->log, LOG_ERR, "[%s, port=%d] failed to listen", c2s->local_http_ip, c2s->local_http_port);
+                        else
+                            log_write(c2s->log, LOG_NOTICE, "[%s, port=%d] listening for connections", c2s->local_http_ip, c2s->local_http_port);
+                    } else
+                        c2s->server_http_fd = NULL;
+
                 }
 
 #ifdef HAVE_SSL

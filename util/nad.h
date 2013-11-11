@@ -124,6 +124,9 @@ JABBERD2_API int nad_find_elem(nad_t nad, int elem, int ns, const char *name, in
 /** find the first matching attribute (and optionally value) */
 JABBERD2_API int nad_find_attr(nad_t nad, int elem, int ns, const char *name, const char *val);
 
+/** find the first matching attribute and copy the value into the buffer */
+JABBERD2_API int nad_get_attrval(nad_t nad, int elem, int ns, const char *name, char* buff, int len);
+
 /** find the first matching namespace (and optionally prefix) */
 JABBERD2_API int nad_find_namespace(nad_t nad, int elem, const char *uri, const char *prefix);
 
@@ -197,3 +200,4 @@ JABBERD2_API nad_t nad_parse(const char *buf, int len);
 #define NAD_ANS(N,A) (N->attrs[A].my_ns)
 
 #endif
+

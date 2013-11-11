@@ -198,6 +198,21 @@
     <!--
     <httpforward>http://www.jabber.org/</httpforward>
     -->
+
+    <http_bind>
+        <!-- Setting this port number to non zero enables http-binding support
+             for an experimental partial XEP-0124 implementation
+             default is 5280 -->
+        <port>0</port>
+
+        <!-- Setting the path to the pem file with a valid certificate
+             will activate and enforce SSL/TLS on this connection -->
+        <pemfile>/usr/local/etc/server.pem</pemfile>
+
+<!--    <cachain>/usr/local/etc/client_ca_certs.pem</cachain> -->
+        <verify-mode>0</verify-mode>
+    </http_bind>
+
   </local>
 
   <!-- Input/output settings -->
