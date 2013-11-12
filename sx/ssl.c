@@ -896,7 +896,8 @@ int sx_ssl_server_addcert(sx_plugin_t p, const char *name, const char *pemfile, 
     ERR_clear_error();
 
     /* create the context */
-    ctx = SSL_CTX_new(TLSv1_2_method());
+    ctx = SSL_CTX_new(SSLv23_method());
+    SSL_CTX_set_options(ctx, SSL_OP_NO_SSLv2 | SSL_OP_NO_SSLv3);
     if(ctx == NULL) {
         _sx_debug(ZONE, "ssl context creation failed; %s", ERR_error_string(ERR_get_error(), NULL));
         return 1;
