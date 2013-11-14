@@ -1583,13 +1583,14 @@ static void c2s_bosh_send_optionheader(bosh_socket_t bosh_sock)
         sx_buf_t buf;
         int len;
         char* http =
-        "HTTP/1.0 200 OK\r\n"
-        "Content-Length 0\r\n"
+        "HTTP/1.1 200 OK\r\n"
         "Server: " PACKAGE_STRING "\r\n"
         "Access-Control-Allow-Origin: *\r\n"
-        "Access-Control-Allow-Methods: GET, POST, OPTIONS"
+        "Access-Control-Allow-Methods: GET, POST, OPTIONS\r\n"
         "Access-Control-Allow-Headers: Content-Type\r\n"
         "Access-Control-Max-Age: 86400\r\n"
+        "Content-Type: text/html\r\n"
+        "Content-Length: 0\r\n"
         "\r\n";
 
         len = strlen(http);
@@ -1899,7 +1900,7 @@ static int c2s_bosh_process_read_data(bosh_socket_t bosh_sock){
             ret = c2s_bosh_read_http_header(bosh_sock);
 
             if(ret == 0)
-                return 0;
+                return 1;
 
             if(ret == -1)
                 return -1;
