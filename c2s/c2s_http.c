@@ -788,7 +788,7 @@ static int _c2s_bosh_queue_data(sess_t sess, char* bodyattrdata, int bodyattrlen
     char* http_responsemask =
         "HTTP/1.1 200 OK\r\n"
         "Content-Type: text/xml\r\n"
-        "Server: Jabberd2\r\n"
+        "Server: " PACKAGE_STRING "\r\n"
         "Access-Control-Allow-Origin: *\r\n"
         "Access-Control-Allow-Headers: Content-Type\r\n"
         "Content-Length: %d\r\n"
@@ -889,7 +889,7 @@ static void _c2s_client_send_bosh_errorcode(bosh_socket_t bosh_sock, int error)
 
     char* http_responsemask =
         "HTTP/1.1 %d %s\r\n"
-        "Server: Jabberd2\r\n"
+        "Server: " PACKAGE_STRING "\r\n"
         "Access-Control-Allow-Origin: *\r\n"
         "Access-Control-Allow-Headers: Content-Type\r\n";
 
@@ -1245,7 +1245,8 @@ static void _c2s_bosh_ssl_init_for_client(bosh_socket_t bosh_sock)
 
         ssl_sx->plugin_data[0] = NULL;
         ssl_sx->ssf = 0;
-
+        /* Prevent calls to sx_error() from the SSL plugin as this makes a lot trouble */
+        ssl_sx->state = state_NONE;
 
         bosh_sock->c2s->sx_bosh_ssl[0].server(ssl_sx, bosh_sock->c2s->sx_bosh_ssl);
 
@@ -1326,6 +1327,8 @@ static int _c2s_bosh_sock_read(bosh_socket_t bosh_sock)
         ssl_sx->want_read = 0;
         ssl_sx->want_write = 0;
         ssl_sx->ssf = bosh_sock->ssf;
+        /* Prevent calls to sx_error() from the SSL plugin as this makes a lot trouble */
+        ssl_sx->state = state_NONE;
         /* Do the sx_ssl_rio() */
         ret = bosh_sock->c2s->sx_bosh_ssl->rio(ssl_sx, bosh_sock->c2s->sx_bosh_ssl, sx_buf);
 
@@ -1378,6 +1381,9 @@ static int _c2s_bosh_sock_write(bosh_socket_t bosh_sock, sx_buf_t sx_buf)
         ssl_sx->want_read = 0;
         ssl_sx->want_write = 0;
         ssl_sx->ssf = bosh_sock->ssf;
+        /* Prevent calls to sx_error() from the SSL plugin as this makes a lot trouble */
+        ssl_sx->state = state_NONE;
+
         /* Do the sx_ssl_wio() */
         ret = bosh_sock->c2s->sx_bosh_ssl->wio(ssl_sx, bosh_sock->c2s->sx_bosh_ssl, sx_buf);
 
@@ -1471,10 +1477,6 @@ static int c2s_bosh_parse_http_header(sx_buf_t buf)
         {
                 headerend = i+4;
 
-                if(buf->len >= 4 && strncmp("GET ", buf->data, 4) == 0)
-                    /* HTTP Get packet. We don't want this. */
-                    return -2;
-
                 if (buf->len >= 15 && strncmp("POST /http-bind ", buf->data, 15) == 0)
                 {
 
@@ -1515,6 +1517,20 @@ static int c2s_bosh_parse_http_header(sx_buf_t buf)
                         }
                     }
                 }
+                if(buf->len >= 4 && strncmp("GET ", buf->data, 4) == 0)
+                {
+                    /* HTTP Get packet. We don't want this. */
+                    buf->data += headerend;
+                    buf->len -= headerend;
+                    return -2;
+                }
+                if(buf->len >= 4 && strncmp("OPTIONS ", buf->data, 4) == 0)
+                {
+                    /* HTTP OPTIONS packet. We have to send them the options: GET POST OPTIONS. */
+                    buf->data += headerend;
+                    buf->len -= headerend;
+                    return -3;
+                }
                 return -1;
         }
     }
@@ -1552,8 +1568,32 @@ static void c2s_bosh_send_get_error(bosh_socket_t bosh_sock)
         "  </body>\r\n"
         "</html>\r\n";
 
-        len = 578;
-        log_write(bosh_sock->c2s->log, LOG_NOTICE, "HTTP request");
+        len = strlen(http);
+        log_write(bosh_sock->c2s->log, LOG_NOTICE, "HTTP GET request");
+        buf = _sx_buffer_new(http, len, NULL, NULL);
+
+        /* send HTTP answer */
+        _c2s_bosh_sock_write(bosh_sock, buf);
+        _sx_buffer_free(buf);
+}
+
+static void c2s_bosh_send_optionheader(bosh_socket_t bosh_sock)
+{
+
+        sx_buf_t buf;
+        int len;
+        char* http =
+        "HTTP/1.0 200 OK\r\n"
+        "Content-Length 0\r\n"
+        "Server: " PACKAGE_STRING "\r\n"
+        "Access-Control-Allow-Origin: *\r\n"
+        "Access-Control-Allow-Methods: GET, POST, OPTIONS"
+        "Access-Control-Allow-Headers: Content-Type\r\n"
+        "Access-Control-Max-Age: 86400\r\n"
+        "\r\n";
+
+        len = strlen(http);
+        log_write(bosh_sock->c2s->log, LOG_NOTICE, "HTTP OPTIONS request");
         buf = _sx_buffer_new(http, len, NULL, NULL);
 
         /* send HTTP answer */
@@ -1576,6 +1616,12 @@ static int c2s_bosh_read_http_header(bosh_socket_t bosh_sock)
         /* Get header. We can not deal with that */
         c2s_bosh_send_get_error(bosh_sock);
         return -1;
+    }
+
+    if(ret == -3)
+    {   /* OPTIONS header. Send him the options */
+        c2s_bosh_send_optionheader(bosh_sock);
+        return 0;
     }
 
     if(ret == -1)
