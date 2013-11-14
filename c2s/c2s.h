@@ -422,6 +422,7 @@ struct bosh_socket_st
     struct _sx_buf_st   write_buf;
 #ifdef HAVE_SSL
     void*               ssl_conn_data;
+    int                 ssf;
 #endif
 };
 

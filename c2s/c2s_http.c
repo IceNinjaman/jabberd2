@@ -1325,9 +1325,11 @@ static int _c2s_bosh_sock_read(bosh_socket_t bosh_sock)
         ssl_sx->plugin_data[0] = bosh_sock->ssl_conn_data;
         ssl_sx->want_read = 0;
         ssl_sx->want_write = 0;
-
+        ssl_sx->ssf = bosh_sock->ssf;
         /* Do the sx_ssl_rio() */
         ret = bosh_sock->c2s->sx_bosh_ssl->rio(ssl_sx, bosh_sock->c2s->sx_bosh_ssl, sx_buf);
+
+        bosh_sock->ssf = ssl_sx->ssf;
 
         if(ret < 0)
         {   /* There is an fatal error */
@@ -1375,9 +1377,11 @@ static int _c2s_bosh_sock_write(bosh_socket_t bosh_sock, sx_buf_t sx_buf)
         ssl_sx->plugin_data[0] = bosh_sock->ssl_conn_data;
         ssl_sx->want_read = 0;
         ssl_sx->want_write = 0;
-
+        ssl_sx->ssf = bosh_sock->ssf;
         /* Do the sx_ssl_wio() */
         ret = bosh_sock->c2s->sx_bosh_ssl->wio(ssl_sx, bosh_sock->c2s->sx_bosh_ssl, sx_buf);
+
+        bosh_sock->ssf = ssl_sx->ssf;
 
         if(!bosh_sock->want_read)
             bosh_sock->want_read = ssl_sx->want_read;
@@ -1703,6 +1707,8 @@ static int c2s_bosh_session_startup(bosh_socket_t bosh_sock, nad_t nad)
                     strncpy(bosh_version, "1.6", sizeof(bosh_version));
                 }
         }
+        /* Do we have a secure channel ? */
+        sess->s->ssf = bosh_sock->ssf;
 
         nad_get_attrval(nad, 0, -1, "content", tmp, sizeof(tmp));
         //Reset it after we have parsed the packet
@@ -1884,6 +1890,9 @@ static int c2s_bosh_process_read_data(bosh_socket_t bosh_sock){
                 nad_free(nad);
                 return -1;
         }
+
+        /* Do we have a secure channel ? */
+        sess->s->ssf = bosh_sock->ssf;
 
         //This is the timeout within we have to respond to the clients connection.
         bosh_sock->waitpoint = time(NULL) + sess->bosh->wait;
