@@ -1,6 +1,6 @@
 EXTRA_DIST = authreg_ntlogon.c authreg_sspi.c
 
-AM_CPPFLAGS = -I$(top_srcdir)/c2s -I@top_srcdir@
+AM_CFLAGS = -I$(top_srcdir)/c2s -I@top_srcdir@
 
 LIBTOOL += --quiet
 
