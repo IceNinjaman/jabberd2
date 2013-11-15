@@ -1430,6 +1430,7 @@ int nad_get_attrval(nad_t nad, int elem, int ns, const char *name, char* buff, i
 
     if((xmlindex = nad_find_attr(nad, elem, ns, name, NULL)) < 0)
     {
+        buff[0] = 0;
         return -1;
     }
 
