@@ -148,6 +148,7 @@ static void _c2s_config_expand(c2s_t c2s)
     c2s->local_http_cachain = config_get_one(c2s->config, "local.http_bind.cachain", 0);
     c2s->local_http_private_key_password = config_get_one(c2s->config, "local.http_bind.private_key_password", 0);
     c2s->local_http_verify_mode = j_atoi(config_get_one(c2s->config, "local.http_bind.verify-mode", 0), 0);
+    c2s->local_http_prebind_token = config_get_one(c2s->config, "local.http_bind.prebind_token", 0);
 
     c2s->local_port = j_atoi(config_get_one(c2s->config, "local.port", 0), 0);
 

@@ -309,6 +309,8 @@ struct c2s_st {
 
     /** availability of sms that we are servicing */
     xht                 sm_avail;
+
+    const char          *local_http_prebind_token;
 };
 
 extern sig_atomic_t c2s_lost_router;
@@ -439,6 +441,8 @@ struct bosh_sess_st
     /* A stupid pointer for c2s_bosh_sx_callback write event. This is not a allocated memory from heap */
     char*               sx_buf;
     int                 sx_buflen;
+
+    int                 term;
 
     bosh_socket_t       connection1;
     bosh_socket_t       connection2;

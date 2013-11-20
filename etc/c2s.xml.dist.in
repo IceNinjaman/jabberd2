@@ -209,8 +209,18 @@
              will activate and enforce SSL/TLS on this connection -->
         <pemfile>/usr/local/etc/server.pem</pemfile>
 
-<!--    <cachain>/usr/local/etc/client_ca_certs.pem</cachain> -->
+        <!-- <cachain>/usr/local/etc/client_ca_certs.pem</cachain> -->
         <verify-mode>0</verify-mode>
+
+        <!-- prebind_token is a secret password needed to prebind a non anonymous session
+             without the need of the users account password.
+             This prebind_token must not be transfered over an non encrypted channel.
+             It has to exceed the length of 16 characters but must not exceed the length of 63.
+             A usual bosh session bind request has to be sent with a random generated RID.
+             It has to include as well a value "prebind_token" encoded in base64 and a value
+             "prebind_username" without the @domain extension which is an existing user on this Jabber server -->
+        <!-- <prebind_token>ThisIsATestPassword</prebind_token> -->
+
     </http_bind>
 
   </local>

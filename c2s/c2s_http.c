@@ -34,6 +34,8 @@ static C2S_API int _c2s_bosh_write_data(sess_t sess, char* bodyattrdata, int bod
 static C2S_API int c2s_bosh_process_read_data(bosh_socket_t bosh_sock);
 static C2S_API int _c2s_bosh_sock_write(bosh_socket_t bosh_sock, sx_buf_t sx_buf);
 static C2S_API int _c2s_bosh_sock_read(bosh_socket_t bosh_sock);
+static C2S_API int c2s_bosh_prebind_startsession(bosh_socket_t bosh_sock, nad_t nad);
+static C2S_API void c2s_bosh_prebind_bindsession(bosh_socket_t bosh_sock, const char* resource);
 
 #ifdef HAVE_SSL
 static C2S_API void _c2s_bosh_ssl_free_for_client(bosh_socket_t bosh_sock);
@@ -432,7 +434,7 @@ static int _c2s_client_bosh_sx_callback(sx_t s, sx_event_t e, void *data, void *
 
             /* they sasl auth'd, so we only want the new-style session start */
             else {
-                log_write(sess->c2s->log, LOG_NOTICE, "[%d] %s authentication succeeded: %s %s:%s%s",
+                log_write(sess->c2s->log, LOG_NOTICE, "[%d] %s authentication succeeded: %s %s%s%s",
                     sess->s->tag, &sess->s->auth_method[5],
                     sess->s->auth_id, sess->s->ip,
                     sess->s->ssf ? " TLS" : "", sess->s->compressed ? " ZLIB" : ""
@@ -489,6 +491,14 @@ static void _c2s_bosh_session_term(sess_t sess, char* termmsg)
     bres_t bres;
     char argbuf[256];
 
+
+    if(sess->bosh->term == 1)
+        return; /* Term has been already called. Prevent twice calling */
+
+    /* This will marks this session as terminating.*/
+    sess->bosh->term = 1;
+
+
     if(sess->bosh->sendbuf != NULL)
     {	//Reset the buffer. Don't care for remaining data.
         free(sess->bosh->sendbuf);
@@ -511,9 +521,21 @@ static void _c2s_bosh_session_term(sess_t sess, char* termmsg)
     if(sess->active)
         for(bres = sess->resources; bres != NULL; bres = bres->next)
             sm_end(sess, bres);
+    sess->bosh->rid = 0;
+
+    xhash_zap(sess->c2s->sessions, sess->skey);
+
+    if(sess->bosh->connection1 != NULL)
+    {
+        mio_close(sess->c2s->mio, sess->bosh->connection1->fd);
+    }
+
+    if(sess->bosh->connection2 != NULL)
+    {
+        mio_close(sess->c2s->mio, sess->bosh->connection2->fd);
+    }
 
     jqueue_push(sess->c2s->dead, (void *) sess->s, 0);
-    xhash_zap(sess->c2s->sessions, sess->skey);
     jqueue_push(sess->c2s->dead_sess, (void *) sess, 0);
 }
 
@@ -576,7 +598,7 @@ static void _c2s_client_bosh_session_walker(const char* sid, int sidlen, void* x
 
     if(sess->bosh->inactivitypoint != 0 && sess->bosh->inactivitypoint < realtime)
     {
-        print_bosh_debug(sess->c2s, "Closing session: %s due to inactivity\n", sess->skey);
+        print_bosh_debug(sess->c2s, "Closing session: %s %p due to inactivity\n", sess->skey, sess);
         _c2s_bosh_session_term(sess, "Inactivity");
         return;
     }
@@ -1470,11 +1492,12 @@ static int c2s_bosh_parse_http_header(sx_buf_t buf)
         return 0;
 
     /* Is the header complete ?*/
-    for(i = 0; i+3 < buf->len; i++)
+    for(i = 0; i+4 < buf->len; i++)
     {
         if(buf->data[i] == '\r' && buf->data[i+1] == '\n' &&
            buf->data[i+2] == '\r' && buf->data[i+3] == '\n' )
         {
+
                 headerend = i+4;
 
                 if (buf->len >= 15 && strncmp("POST /http-bind ", buf->data, 15) == 0)
@@ -1531,6 +1554,7 @@ static int c2s_bosh_parse_http_header(sx_buf_t buf)
                     buf->len -= headerend;
                     return -3;
                 }
+                __asm__("int $3");
                 return -1;
         }
     }
@@ -1625,9 +1649,10 @@ static int c2s_bosh_read_http_header(bosh_socket_t bosh_sock)
         return 0;
     }
 
-    if(ret == -1)
+    if(ret == -1){
         /* Invalid Packet */
         return -1;
+    }
 
     bosh_sock->http_contentlength = ret;
 
@@ -1758,8 +1783,7 @@ static int c2s_bosh_session_startup(bosh_socket_t bosh_sock, nad_t nad)
         sess->s->ssf = bosh_sock->ssf;
 
         nad_get_attrval(nad, 0, -1, "content", tmp, sizeof(tmp));
-        //Reset it after we have parsed the packet
-        bosh_sock->http_contentlength = 0;
+
         _sx_buffer_alloc_margin(&bosh_sock->read_buf, 0, 0);
         //Start the stream now
         ret = _sx_server_bosh_stream_restart(sess->s, to, bosh_xmppclient_version);
@@ -1785,8 +1809,6 @@ static int c2s_bosh_process_stream_restart_request(bosh_socket_t bosh_sock, nad_
         sess_t sess;
         char to[512];
 
-        bosh_sock->http_contentlength = 0;
-
         nad_get_attrval(nad, 0, -1, "to", to, sizeof(to));
 
 
@@ -1802,9 +1824,6 @@ static int c2s_bosh_process_stream_restart_request(bosh_socket_t bosh_sock, nad_
 
         //Unusual that the client will have now on 2nd stream start a different version. As atm. only version exists we send always 1.0
         _sx_server_bosh_stream_restart(sess->s, to, "1.0");
-
-        if(_c2s_bosh_write_data(sess, NULL, 0, 1, 1) < 1)
-            return -1;
 
         bosh_sock->want_read = 1;
         return 1;
@@ -1835,13 +1854,10 @@ static int c2s_bosh_read_payload(bosh_socket_t bosh_sock)
 {
 
         int payloadlen;
-        int buffer_advance;
         int ret;
         /* Find the length of the content. Search for the final </body> tag. We search from backwards for it.
         in case http_contentlength is smaller than read_buf->len this getting catched earlier */
         payloadlen = bosh_sock->http_contentlength;
-        buffer_advance = bosh_sock->http_contentlength;
-        bosh_sock->http_contentlength = 0;
 
         for(payloadlen-- ; payloadlen > 0; payloadlen--)
         {
@@ -1855,8 +1871,6 @@ static int c2s_bosh_read_payload(bosh_socket_t bosh_sock)
 
         ret = _sx_bosh_read(bosh_sock->sess->s, bosh_sock->read_buf.data, payloadlen);
 
-        bosh_sock->read_buf.data += buffer_advance;
-        bosh_sock->read_buf.len -= buffer_advance;
 
         if(bosh_sock->read_buf.len < 0)
             __asm__("int $3");
@@ -1864,13 +1878,6 @@ static int c2s_bosh_read_payload(bosh_socket_t bosh_sock)
         if(ret > 0)
             bosh_sock->want_read = 1;
 
-        if(bosh_sock->read_buf.len > 0)
-        {
-            if(bosh_sock->sess)
-                print_bosh_debug(bosh_sock->c2s, "Have more data to read: %s\n", bosh_sock->sess->skey);
-
-            bosh_sock->want_read = 1;
-        }
 
         return ret;
 
@@ -1902,9 +1909,10 @@ static int c2s_bosh_process_read_data(bosh_socket_t bosh_sock){
             if(ret == 0)
                 return 1;
 
-            if(ret == -1)
-                return -1;
+            if(ret == -1){
 
+                return -1;
+            }
         }
 
         if(bosh_sock->read_buf.len < bosh_sock->http_contentlength)
@@ -1922,12 +1930,27 @@ static int c2s_bosh_process_read_data(bosh_socket_t bosh_sock){
                 return -1;
         }
 
+        if(nad_find_attr(nad, 0, -1, "prebind_token", NULL) >= 0 && bosh_sock->sess == NULL)
+        {
+            ret = c2s_bosh_prebind_startsession(bosh_sock, nad);
+            nad_free(nad);
+            bosh_sock->read_buf.len -= bosh_sock->http_contentlength;
+            bosh_sock->read_buf.data += bosh_sock->http_contentlength;
+            bosh_sock->http_contentlength = 0;
+            return ret;
+        }
+
         if(nad_get_attrval(nad, 0, -1, "sid", sid, sizeof(sid)) < 0 && bosh_sock->sess == NULL)
         {
             ret = c2s_bosh_session_startup(bosh_sock, nad);
             nad_free(nad);
+
+            bosh_sock->read_buf.len -= bosh_sock->http_contentlength;
+            bosh_sock->read_buf.data += bosh_sock->http_contentlength;
+            bosh_sock->http_contentlength = 0;
             return ret;
         }
+
         //Get our session if possible
         sess = _c2s_bosh_get_session_for_client(bosh_sock, sid);
         if(!sess)
@@ -1969,6 +1992,7 @@ static int c2s_bosh_process_read_data(bosh_socket_t bosh_sock){
                 nad_free(nad);
                 return -1;
             }
+
         }
 
         /* they did something */
@@ -1978,6 +2002,9 @@ static int c2s_bosh_process_read_data(bosh_socket_t bosh_sock){
         {
                 ret = c2s_bosh_process_stream_restart_request(bosh_sock, nad);
                 nad_free(nad);
+                bosh_sock->read_buf.len -= bosh_sock->http_contentlength;
+                bosh_sock->read_buf.data += bosh_sock->http_contentlength;
+                bosh_sock->http_contentlength = 0;
                 return ret;
         }
 
@@ -1987,8 +2014,18 @@ static int c2s_bosh_process_read_data(bosh_socket_t bosh_sock){
 
         ret = c2s_bosh_read_payload(bosh_sock);
 
-        if(bosh_sock->read_buf.len == 0)
+        bosh_sock->read_buf.len -= bosh_sock->http_contentlength;
+        bosh_sock->read_buf.data += bosh_sock->http_contentlength;
+        bosh_sock->http_contentlength = 0;
+
+        if(bosh_sock->read_buf.len == 0){
             _sx_buffer_clear(&bosh_sock->read_buf);
+        }else{
+            if(bosh_sock->sess)
+                print_bosh_debug(bosh_sock->c2s, "Have more data to read: %s\n", bosh_sock->sess->skey);
+
+            bosh_sock->want_read = 1;
+        }
 
         if(nad_get_attrval(nad, 0, -1, "type", type, sizeof(type)) == 0 && !strncmp(type, "terminate", 9))
         {
@@ -1999,8 +2036,9 @@ static int c2s_bosh_process_read_data(bosh_socket_t bosh_sock){
         nad_free(nad);
 
         if(_c2s_bosh_write_data(sess, NULL, 0, 1, 1) < 0)
+        {
             return -1;
-
+        }
         return ret; //No more to read = return 0
 
 
@@ -2163,3 +2201,173 @@ void c2s_bosh_free_session(sess_t sess)
         free(sess->bosh);
         sess->bosh = NULL;
 }
+
+
+
+
+void c2s_bosh_prebind_bindsession(bosh_socket_t bosh_sock, const char* resource)
+{
+        int ns;
+        sess_t sess;
+        sx_buf_t wipebuf;
+
+        /* resource bind */
+        bres_t bres, ires;
+
+        if(bosh_sock->sess == NULL)
+            return;
+
+        sess = bosh_sock->sess;
+
+        jid_t jid = jid_new(sess->s->auth_id, -1);
+
+        /* get the resource */
+//        elem = nad_find_elem(nad, elem, ns, "resource", 1);
+
+        /* user-specified resource */
+        if(resource != NULL && resource[0] != '\0') {
+
+            /* Put resource into JID */
+            if (jid == NULL || jid_reset_components(jid, jid->node, jid->domain, resource) == NULL) {
+                log_debug(ZONE, "invalid jid data");
+                return;
+            }
+
+            /* check if resource already bound */
+            for(bres = sess->resources; bres != NULL; bres = bres->next)
+                if(strcmp(bres->jid->resource, jid->resource) == 0){
+
+                    log_debug(ZONE, "resource /%s already bound - generating", jid->resource);
+                    jid_random_part(jid, jid_RESOURCE);
+                }
+
+        } else {
+            /* generate random resource */
+            log_debug(ZONE, "no resource given - generating");
+            jid_random_part(jid, jid_RESOURCE);
+        }
+
+        /* attach new bound jid holder */
+        bres = (bres_t) calloc(1, sizeof(struct bres_st));
+        bres->jid = jid;
+        if(sess->resources != NULL) {
+            for(ires = sess->resources; ires->next != NULL; ires = ires->next);
+            ires->next = bres;
+        } else
+            sess->resources = bres;
+
+        sess->bound += 1;
+
+        log_write(sess->c2s->log, LOG_NOTICE, "[%s] bound: jid=%s", sess->skey, jid_full(bres->jid));
+
+        /* build a result packet, we'll send this back to the client after we have a session for them */
+        sess->result = nad_new();
+
+        ns = nad_add_namespace(sess->result, uri_CLIENT, NULL);
+
+        nad_append_elem(sess->result, ns, "iq", 0);
+        nad_set_attr(sess->result, 0, -1, "type", "result", 6);
+
+        ns = nad_add_namespace(sess->result, uri_BIND, NULL);
+
+        nad_append_elem(sess->result, ns, "bind", 1);
+        nad_append_elem(sess->result, ns, "jid", 2);
+        nad_append_cdata(sess->result, jid_full(bres->jid), strlen(jid_full(bres->jid)), 3);
+
+        /* our local id */
+        strncpy(bres->c2s_id, sess->skey, sizeof(bres->c2s_id));
+        bres->c2s_id[sizeof(bres->c2s_id) -1] = 0;
+
+        /* start a session with the sm */
+        sm_start(sess, bres);
+
+        /* wipe every buffer which has data to write! */
+        if(bosh_sock->sess->s->wbufpending)
+        {
+            _sx_buffer_free(bosh_sock->sess->s->wbufpending);
+            bosh_sock->sess->s->wbufpending = NULL;
+        }
+        while((wipebuf = jqueue_pull(bosh_sock->sess->s->wbufq)) != NULL)
+        {
+            _sx_buffer_free(wipebuf);
+        }
+
+        /* handled */
+        return;
+
+}
+
+int c2s_bosh_prebind_startsession(bosh_socket_t bosh_sock, nad_t nad)
+{
+
+    char prebind_token[64];
+    char prebind_token64[40];
+    char prebind_username[128];
+    char prebind_resource[128];
+
+    c2s_t c2s = bosh_sock->c2s;
+
+    nad_get_attrval(nad, 0, -1, "prebind_token", prebind_token64, sizeof(prebind_token64));
+    apr_base64_decode(prebind_token, prebind_token64, sizeof(prebind_token));
+
+    if(strlen(prebind_token) > 16 && c2s->local_http_prebind_token != NULL && strcmp(prebind_token, c2s->local_http_prebind_token) == 0)
+    {
+
+
+        if(nad_get_attrval(nad, 0, -1, "prebind_username", prebind_username, sizeof(prebind_username)) != 0)
+        {
+            log_write(c2s->log, LOG_ERR, "Prebind request without a username");
+            _c2s_client_send_bosh_errorcode(bosh_sock, 400);
+            return -1;
+        }
+
+        log_write(c2s->log, LOG_NOTICE, "Processing http-prebind request for the user: %s\n", prebind_username);
+
+        nad_get_attrval(nad, 0, -1, "prebind_resource", prebind_resource, sizeof(prebind_resource));
+
+        /* we need user_exists(), at the very least */
+        if(c2s->ar == NULL || c2s->ar->user_exists == NULL)
+        {
+            log_write(c2s->log, LOG_ERR, "auth module has no check for user existence");
+            _c2s_client_send_bosh_errorcode(bosh_sock, 400);
+            return -1;
+        }
+        if(c2s_bosh_session_startup(bosh_sock, nad) < 0)
+        {
+            _c2s_client_send_bosh_errorcode(bosh_sock, 400);
+            return -1;
+        }
+        if(bosh_sock->sess == NULL){
+            _c2s_client_send_bosh_errorcode(bosh_sock, 400);
+            return -1;
+        }
+
+        /* do we have the user? */
+        if((c2s->ar->user_exists)(c2s->ar, prebind_username, bosh_sock->sess->host->realm) == 0) {
+            log_write(c2s->log, LOG_ERR, "Prebind request for an invalid user name");
+            _c2s_client_send_bosh_errorcode(bosh_sock, 404);
+            return -1;
+        }
+
+        bosh_sock->sess->sasl_authd = 1;
+        bosh_sock->sess->s->auth_id = malloc(strlen(prebind_username) + strlen(bosh_sock->sess->host->realm) + 2);
+
+        if(bosh_sock->sess->s->auth_id == NULL){
+
+                _c2s_client_send_bosh_errorcode(bosh_sock, 400);
+                return -1;
+        }
+        sprintf((char*)bosh_sock->sess->s->auth_id, "%s@%s", prebind_username, bosh_sock->sess->host->realm);
+
+        c2s_bosh_prebind_bindsession(bosh_sock, prebind_resource);
+
+
+    }else{
+
+        _c2s_client_send_bosh_errorcode(bosh_sock, 403);
+    }
+
+    return -1;
+
+}
+
