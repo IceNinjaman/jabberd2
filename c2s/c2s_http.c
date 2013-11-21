@@ -1683,9 +1683,10 @@ static nad_t c2s_bosh_get_body_header(bosh_socket_t bosh_sock)
 
                             /* Also shrink the http_contentlength value to the remaining amount of data*/
                             bosh_sock->http_contentlength -= i;
-                            if(bosh_sock->http_contentlength < bosh_sock->read_buf.len)
+                            if(bosh_sock->http_contentlength < 0 || bosh_sock->read_buf.len < 0 || bosh_sock->read_buf.len < bosh_sock->http_contentlength)
                             {
                             /* Catch it just in case I have made a mistake */
+                                log_write(bosh_sock->c2s->log, LOG_ERR, "Software Error in c2s_bosh_get_body_header #1: Invalid end of packet. End of read contentlength: %d end of read buf: %d\n", bosh_sock->http_contentlength, bosh_sock->read_buf.len);
                                 nad_free(nad);
                                 return NULL;
                             }
@@ -1707,9 +1708,10 @@ static nad_t c2s_bosh_get_body_header(bosh_socket_t bosh_sock)
 
                             /* Also shrink the http_contentlength value to the remaining amount of data*/
                             bosh_sock->http_contentlength -= i;
-                            if(bosh_sock->http_contentlength < bosh_sock->read_buf.len)
+                            if(bosh_sock->http_contentlength < 0 || bosh_sock->read_buf.len < 0 || bosh_sock->read_buf.len < bosh_sock->http_contentlength)
                             {
                             /* Catch it just in case I have made a mistake */
+                                log_write(bosh_sock->c2s->log, LOG_ERR, "Software Error in c2s_bosh_get_body_header #2: Invalid end of packet. End of read contentlength: %d end of read buf: %d\n", bosh_sock->http_contentlength, bosh_sock->read_buf.len);
                                 nad_free(nad);
                                 return NULL;
                             }
@@ -2362,7 +2364,7 @@ int c2s_bosh_prebind_startsession(bosh_socket_t bosh_sock, nad_t nad)
 
 
     }else{
-
+        log_write(c2s->log, LOG_NOTICE, "Http-prebind request from: %s without a valid token\n", bosh_sock->ip);
         _c2s_client_send_bosh_errorcode(bosh_sock, 403);
     }
 
