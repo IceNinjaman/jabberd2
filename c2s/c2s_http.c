@@ -1492,7 +1492,7 @@ static int c2s_bosh_parse_http_header(sx_buf_t buf)
         return 0;
 
     /* Is the header complete ?*/
-    for(i = 0; i+4 < buf->len; i++)
+    for(i = 0; i+3 < buf->len; i++)
     {
         if(buf->data[i] == '\r' && buf->data[i+1] == '\n' &&
            buf->data[i+2] == '\r' && buf->data[i+3] == '\n' )
@@ -1540,21 +1540,20 @@ static int c2s_bosh_parse_http_header(sx_buf_t buf)
                         }
                     }
                 }
-                if(buf->len >= 4 && strncmp("GET ", buf->data, 4) == 0)
+                if(buf->len >= 3 && strncmp("GET", buf->data, 3) == 0)
                 {
                     /* HTTP Get packet. We don't want this. */
                     buf->data += headerend;
                     buf->len -= headerend;
                     return -2;
                 }
-                if(buf->len >= 4 && strncmp("OPTIONS ", buf->data, 4) == 0)
+                if(buf->len >= 7 && strncmp("OPTIONS ", buf->data, 7) == 0)
                 {
                     /* HTTP OPTIONS packet. We have to send them the options: GET POST OPTIONS. */
                     buf->data += headerend;
                     buf->len -= headerend;
                     return -3;
                 }
-                __asm__("int $3");
                 return -1;
         }
     }
