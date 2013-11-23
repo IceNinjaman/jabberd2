@@ -521,19 +521,10 @@ static void _c2s_bosh_session_term(sess_t sess, char* termmsg)
     if(sess->active)
         for(bres = sess->resources; bres != NULL; bres = bres->next)
             sm_end(sess, bres);
+
     sess->bosh->rid = 0;
 
     xhash_zap(sess->c2s->sessions, sess->skey);
-
-    if(sess->bosh->connection1 != NULL)
-    {
-        mio_close(sess->c2s->mio, sess->bosh->connection1->fd);
-    }
-
-    if(sess->bosh->connection2 != NULL)
-    {
-        mio_close(sess->c2s->mio, sess->bosh->connection2->fd);
-    }
 
     jqueue_push(sess->c2s->dead, (void *) sess->s, 0);
     jqueue_push(sess->c2s->dead_sess, (void *) sess, 0);
@@ -2073,7 +2064,11 @@ int _c2s_client_bosh_mio_callback(mio_t m, mio_action_t a, mio_fd_t fd, void *da
 
             log_debug(ZONE, "reading from %d", fd->fd);
 
-
+            if(bosh_sock->sess != NULL && bosh_sock->sess->bosh != NULL && bosh_sock->sess->bosh->term == 1)
+            {
+                    mio_close(bosh_sock->c2s->mio, bosh_sock->fd);
+                    return 0;
+            }
             if(_c2s_bosh_sock_read(bosh_sock) == 1)
             {
                 ret = c2s_bosh_process_read_data(bosh_sock);
@@ -2098,6 +2093,12 @@ int _c2s_client_bosh_mio_callback(mio_t m, mio_action_t a, mio_fd_t fd, void *da
             log_debug(ZONE, "write action on fd %d", fd->fd);
 
             sx_buf = _sx_buffer_new(NULL, 0, NULL, NULL);
+
+            if(bosh_sock->sess != NULL && bosh_sock->sess->bosh != NULL && bosh_sock->sess->bosh->term == 1)
+            {
+                    mio_close(bosh_sock->c2s->mio, bosh_sock->fd);
+                    return 0;
+            }
 
             if(bosh_sock->sess != NULL && bosh_sock->sess->s != NULL && bosh_sock->sess->bosh->sendbuf != NULL && bosh_sock->sess->bosh->sendcursize > 0 && bosh_sock->fd != NULL)
             {
