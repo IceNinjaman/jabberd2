@@ -1564,7 +1564,7 @@ static void c2s_bosh_send_get_error(bosh_socket_t bosh_sock)
         int len;
         char* http =
         "HTTP/1.0 200 OK\r\n"
-        "Content-Length 346\r\n"
+        "Content-Length: 285\r\n"
         "Server: " PACKAGE_STRING "\r\n"
         "Last-Modified: Mon, 30 Sep 2013 10:10:10 GMT\r\n"
         "Date: Mon, 30 Sep 2013 10:10:10 GMT\r\n"
@@ -1577,7 +1577,7 @@ static void c2s_bosh_send_get_error(bosh_socket_t bosh_sock)
         "  <head>\r\n"
         "    <title>JabberD2 BOSH</title>\r\n"
         "  </head>\r\n"
-        "  <body bgcolor=\"#FFFFFF\" marginheight=\"0\" marginwidth=\"0\" leftmargin=\"0\" topmargin=\"0\">\r\n"
+        "  <body bgcolor=\"#FFFFFF\">\r\n"
         "      A <a href='http://www.xmpp.org/extensions/xep-0124.html'>XEP-0124</a> - BOSH - component of Jabberd2.\r\n"
         "  </body>\r\n"
         "</html>\r\n";
