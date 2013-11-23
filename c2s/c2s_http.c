@@ -1993,11 +1993,12 @@ static int c2s_bosh_process_read_data(bosh_socket_t bosh_sock){
         if(nad_get_attrval(nad, 0, -1, "restart", isrestart, sizeof(isrestart)) == 0 && !strncmp(isrestart, "true", 4))
         {
                 ret = c2s_bosh_process_stream_restart_request(bosh_sock, nad);
-                nad_free(nad);
-                bosh_sock->read_buf.len -= bosh_sock->http_contentlength;
-                bosh_sock->read_buf.data += bosh_sock->http_contentlength;
-                bosh_sock->http_contentlength = 0;
-                return ret;
+
+                if(ret < 0)
+                {
+                    nad_free(nad);
+                    return ret;
+                }
         }
 
         /* We got a response so our client is active */
