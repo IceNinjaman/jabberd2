@@ -2049,33 +2049,44 @@ int _c2s_client_bosh_mio_callback(mio_t m, mio_action_t a, mio_fd_t fd, void *da
     socklen_t namelen = sizeof(sa);
     int port, nbytes, ret;
     sx_buf_t sx_buf;
+    static int entered, mio_want_close;
 
-    switch(a) {
+    ret = 0;
+
+    if(mio_want_close == 0){
+
+      entered ++;
+
+      switch(a) {
         case action_READ:
+
+            if(bosh_sock->sess != NULL && bosh_sock->sess->bosh != NULL && bosh_sock->sess->bosh->term == 1)
+            {
+                    mio_want_close++;
+                    ret = 0;
+                    break;
+            }
 
             log_debug(ZONE, "read action on fd %d", fd->fd);
 
             ioctl(fd->fd, FIONREAD, &nbytes);
 
             if(nbytes == 0) {
-                mio_close(bosh_sock->c2s->mio, bosh_sock->fd);
-                return 0;
+                mio_want_close++;
+                ret = 0;
+                break;
             }
 
             log_debug(ZONE, "reading from %d", fd->fd);
 
-            if(bosh_sock->sess != NULL && bosh_sock->sess->bosh != NULL && bosh_sock->sess->bosh->term == 1)
-            {
-                    mio_close(bosh_sock->c2s->mio, bosh_sock->fd);
-                    return 0;
-            }
             if(_c2s_bosh_sock_read(bosh_sock) == 1)
             {
                 ret = c2s_bosh_process_read_data(bosh_sock);
                 if(ret < 0)
                 {
-                    mio_close(bosh_sock->c2s->mio, bosh_sock->fd);
-                    return 0;
+                    mio_want_close++;
+                    ret = 0;
+                    break;
 
                 }else if(ret > 0){
                     bosh_sock->want_read = 1;
@@ -2086,19 +2097,22 @@ int _c2s_client_bosh_mio_callback(mio_t m, mio_action_t a, mio_fd_t fd, void *da
             if(bosh_sock->want_write)
                 mio_write(bosh_sock->c2s->mio, bosh_sock->fd);
 
-            return bosh_sock->want_read; //No more to read = return 0
+            ret = bosh_sock->want_read; //No more to read = return 0
+            break;
 
         case action_WRITE:
+
+            if(bosh_sock->sess != NULL && bosh_sock->sess->bosh != NULL && bosh_sock->sess->bosh->term == 1)
+            {
+                    mio_want_close++;
+                    ret = 0;
+                    break;
+            }
 
             log_debug(ZONE, "write action on fd %d", fd->fd);
 
             sx_buf = _sx_buffer_new(NULL, 0, NULL, NULL);
 
-            if(bosh_sock->sess != NULL && bosh_sock->sess->bosh != NULL && bosh_sock->sess->bosh->term == 1)
-            {
-                    mio_close(bosh_sock->c2s->mio, bosh_sock->fd);
-                    return 0;
-            }
 
             if(bosh_sock->sess != NULL && bosh_sock->sess->s != NULL && bosh_sock->sess->bosh->sendbuf != NULL && bosh_sock->sess->bosh->sendcursize > 0 && bosh_sock->fd != NULL)
             {
@@ -2106,8 +2120,9 @@ int _c2s_client_bosh_mio_callback(mio_t m, mio_action_t a, mio_fd_t fd, void *da
 
                 if(_c2s_bosh_sock_write(bosh_sock, sx_buf) < 0)
                 {
-                    mio_close(bosh_sock->c2s->mio, bosh_sock->fd);
-                    return 0;
+                    mio_want_close++;
+                    ret = 0;
+                    break;
                 }
                 bosh_sock->sess->bosh->sendbuf = NULL;
                 bosh_sock->sess->bosh->sendcursize = 0;
@@ -2117,8 +2132,9 @@ int _c2s_client_bosh_mio_callback(mio_t m, mio_action_t a, mio_fd_t fd, void *da
 
                 if(_c2s_bosh_sock_write(bosh_sock, sx_buf) < 0)
                 {
-                    mio_close(bosh_sock->c2s->mio, bosh_sock->fd);
-                    return 0;
+                    mio_want_close++;
+                    ret = 0;
+                    break;
                 }
 
             }
@@ -2127,7 +2143,8 @@ int _c2s_client_bosh_mio_callback(mio_t m, mio_action_t a, mio_fd_t fd, void *da
             if(bosh_sock->want_read)
                 mio_read(bosh_sock->c2s->mio, bosh_sock->fd);
 
-            return bosh_sock->want_write;
+            ret = bosh_sock->want_write;
+            break;
 
             //If we have no more to write: return 0
 
@@ -2135,7 +2152,8 @@ int _c2s_client_bosh_mio_callback(mio_t m, mio_action_t a, mio_fd_t fd, void *da
 
             log_debug(ZONE, "close action on fd %d", fd->fd);
             _c2s_bosh_socket_close(bosh_sock);
-            break;
+            entered --;
+            return 0;
 
         case action_ACCEPT:
             log_debug(ZONE, "accept action on fd %d", fd->fd);
@@ -2146,17 +2164,24 @@ int _c2s_client_bosh_mio_callback(mio_t m, mio_action_t a, mio_fd_t fd, void *da
             log_write(c2s->log, LOG_NOTICE, "[%d] [%s, port=%d] connect", fd->fd, (char *) data, port);
 
             if(c2s == NULL)
-                return 1;
+            {
+                ret = 1;
+                break;
+            }
 
             if(_c2s_client_accept_check(c2s, fd, (char *) data) != 0)
-                return 1;
+            {
+                ret = 1;
+                break;
+            }
 
             bosh_sock = (bosh_socket_t) calloc(1, sizeof(struct bosh_socket_st));
 
             if(bosh_sock == NULL)
             {
                 log_debug(ZONE, "Out of memory! Dropping fd %d", fd->fd);
-                return 1;
+                ret = 1;
+                break;
             }
 
             bosh_sock->c2s = c2s;
@@ -2177,14 +2202,19 @@ int _c2s_client_bosh_mio_callback(mio_t m, mio_action_t a, mio_fd_t fd, void *da
             _c2s_bosh_ssl_init_for_client(bosh_sock);
 #endif
             mio_read(bosh_sock->c2s->mio, bosh_sock->fd);
-
             break;
 
+      }
+      entered --;
     }
 
-    return 0;
+    if(mio_want_close > 0 && entered == 0)
+    {
+        mio_want_close = 0;
+        mio_close(bosh_sock->c2s->mio, bosh_sock->fd);
+    }
+    return ret;
 }
-
 
 void c2s_bosh_free_session(sess_t sess)
 {
