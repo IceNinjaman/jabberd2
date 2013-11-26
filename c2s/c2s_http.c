@@ -1475,6 +1475,8 @@ static int _c2s_bosh_sock_write(bosh_socket_t bosh_sock, sx_buf_t sx_buf)
 
 }
 
+
+/* Returns 0 if not enough data. Returns > 0 if header is complete */
 static int c2s_bosh_parse_http_header(sx_buf_t buf)
 {
     int i, k, contentlength, headerend;
@@ -1502,7 +1504,7 @@ static int c2s_bosh_parse_http_header(sx_buf_t buf)
                         {
                             i += 2;
 
-                            if(strncmp(&buf->data[i], "Content-Length:", 15) == 0)
+                            if(strncasecmp(&buf->data[i], "Content-Length:", 15) == 0)
                             {
                                 i += 15;
 
@@ -1878,8 +1880,8 @@ static int c2s_bosh_read_payload(bosh_socket_t bosh_sock)
 
 
 /*
-return 0 = Don't have complete data yet. Can't process data.
-return 1 = There is data to read.
+return 1 = Don't have complete data yet. Can't process data.
+return 0 = There is data to read.
 return -1 = Fatal Error. Connection should be closed by callie.
 */
 
@@ -1893,7 +1895,6 @@ static int c2s_bosh_process_read_data(bosh_socket_t bosh_sock){
     sess_t sess;
 
     sid[0] = '\0';
-
         if(bosh_sock->http_contentlength == 0) //If this is true we have no message start and no message length
         {
             ret = c2s_bosh_read_http_header(bosh_sock);
@@ -1902,16 +1903,17 @@ static int c2s_bosh_process_read_data(bosh_socket_t bosh_sock){
                 return 1;
 
             if(ret == -1){
-
                 return -1;
             }
         }
 
+
         if(bosh_sock->read_buf.len < bosh_sock->http_contentlength)
         {   /* Still incomplete data */
-            return 0;
+printf("Waiting for %d more data\n", bosh_sock->http_contentlength - bosh_sock->read_buf.len);
+            return 1;
         }
-
+printf("Process %d data\n", bosh_sock->http_contentlength);
         log_debug(ZONE, "Attempt to read %d bytes", bosh_sock->http_contentlength);
 
         nad = c2s_bosh_get_body_header(bosh_sock);
